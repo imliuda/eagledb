@@ -1,13 +1,14 @@
 package point
 
 import (
+	"bytes"
 	"fmt"
 	"log"
-	"bytes"
+	"sort"
 	"strconv"
 )
 
-type FieldType int
+type ValueType int
 
 const (
 	Integer = iota
@@ -23,8 +24,8 @@ type Tag struct {
 }
 
 type Field struct {
-	Key []byte
-	Type  FieldType
+	Key   []byte
+	Type  ValueType
 	Value interface{}
 }
 
@@ -65,11 +66,15 @@ const (
 	PARSE_DONE
 )
 
+var (
+	WrongValueTypeError = fmt.Errorf("wrong value type")
+)
+
 func escape(value []byte, chars []byte) []byte {
 	r := make([]byte, 0, len(value))
 	for _, c := range value {
 		for _, e := range chars {
-			if c == e || c == byte('\\'){
+			if c == e || c == byte('\\') {
 				r = append(r, '\\')
 			}
 		}
@@ -83,7 +88,7 @@ func unescape(value []byte, chars []byte) []byte {
 	vlen := len(value)
 	for i, c := range value {
 		if c == byte('\\') {
-			if i == vlen - 1 {
+			if i == vlen-1 {
 				r = append(r, c)
 			} else {
 				for _, e := range chars {
@@ -101,7 +106,7 @@ func unescape(value []byte, chars []byte) []byte {
 	return r
 }
 
-func escapeStringValue (value []byte) []byte {
+func escapeStringValue(value []byte) []byte {
 	return value
 }
 
@@ -120,9 +125,9 @@ func Parse(buffer []byte) ([]*Point, error) {
 	var start = 0
 	var stat = PARSE_START
 	for i, c = range buffer {
-		log.Println(i, c)
+		//log.Println(i, c)
 		if stat == PARSE_START {
-			if c == byte(' ') || c == byte('\n') {
+			if c == ' ' || c == '\n' {
 				continue
 			} else {
 				point = &Point{}
@@ -130,15 +135,15 @@ func Parse(buffer []byte) ([]*Point, error) {
 				stat = PARSE_NAME
 			}
 		} else if stat == PARSE_NAME {
-			if c == byte('\n') {
+			if c == '\n' {
 				goto line_error
-			} else if c == byte(' ') && buffer[i-1] != byte('\\') {
+			} else if c == ' ' && buffer[i-1] != '\\' {
 				name := buffer[start:i]
 				name = escape(name, []byte(", "))
 				log.Println(name)
 				point.SetName(name)
 				stat = PARSE_FIELD_KEY_START
-			} else if c == byte(',') && buffer[i-1] != byte('\\') {
+			} else if c == ',' && buffer[i-1] != '\\' {
 				name := buffer[start:i]
 				name = escape(name, []byte(", "))
 				point.SetName(name)
@@ -148,162 +153,187 @@ func Parse(buffer []byte) ([]*Point, error) {
 				continue
 			}
 		} else if stat == PARSE_TAG_KEY {
-			if c == byte('\n') {
+			if c == '\n' {
 				goto line_error
-			} else if c == byte(' ') && buffer[i-1] != byte('\\') {
+			} else if c == ' ' && buffer[i-1] != '\\' {
 				goto space_error
-			} else if c == byte('=') && buffer[i-1] != byte('\\') {
-				key := buffer[start:i]
+			} else if c == '=' && buffer[i-1] != '\\' {
+				key = buffer[start:i]
 				key = escape(key, []byte("= "))
-				key = []byte(key)
 				start = i + 1
 				stat = PARSE_TAG_VALUE
 			} else {
 				continue
 			}
 		} else if stat == PARSE_TAG_VALUE {
-			if c == byte('\n') {
+			if c == '\n' {
 				goto line_error
-			} else if c == byte(' ') && buffer[i-1] != byte('\\') {
+			} else if c == ' ' && buffer[i-1] != '\\' {
 				value := buffer[start:i]
 				value = escape(value, []byte(",="))
 				point.AddTag(key, value)
 				stat = PARSE_FIELD_KEY_START
-			} else if c == byte(',') && buffer[i-1] != byte('\\') {
+			} else if c == ',' && buffer[i-1] != '\\' {
 				value := buffer[start:i]
 				value = escape(value, []byte(",="))
 				point.AddTag(key, value)
+				start = i + 1
 				stat = PARSE_TAG_KEY
 			} else {
 				continue
 			}
 		} else if stat == PARSE_FIELD_KEY_START {
-			if c == byte('\n') {
+			if c == '\n' {
 				goto line_error
-			} else if c != byte(' ') {
+			} else if c != ' ' {
 				start = i
 				stat = PARSE_FIELD_KEY
 			} else {
 				continue
 			}
 		} else if stat == PARSE_FIELD_KEY {
-			if c == byte('\n') {
+			if c == '\n' {
 				goto line_error
-			} else if c == byte(' ') && buffer[i-1] != byte('\\') {
+			} else if c == ' ' && buffer[i-1] != '\\' {
 				goto space_error
-			} else if c == byte('=') && buffer[i-1] != byte('\\') {
+			} else if c == '=' && buffer[i-1] != '\\' {
 				key = buffer[start:i]
-				key = escape([]byte(key), []byte("= "))
+				key = escape(key, []byte("= "))
 				start = i + 1
 				stat = PARSE_FIELD_VALUE
 			} else {
 				continue
 			}
 		} else if stat == PARSE_FIELD_VALUE {
-			if c == byte('"') {
+			if c == '"' {
 				stat = PARSE_FIELD_VALUE_STRING
-			} else if c >= byte('0') && c <= byte('9') || c == byte('-'){
+			} else if c >= '0' && c <= '9' || c == '-' {
 				stat = PARSE_FIELD_VALUE_NUMBER
-			} else if c == byte('t') {
+			} else if c == 't' {
 				stat = PARSE_FIELD_VALUE_BOOLEAN_TR
-			} else if c == byte('f') {
+			} else if c == 'f' {
 				stat = PARSE_FIELD_VALUE_BOOLEAN_FA
-			} else if c == byte('n') {
+			} else if c == 'n' {
 				stat = PARSE_FIELD_VALUE_NU
 			} else {
 				goto value_error
 			}
 		} else if stat == PARSE_FIELD_VALUE_STRING {
-			if c == byte('"') && buffer[i-1] != byte('\\') {
+			if c == '"' && buffer[i-1] != '\\' {
 				value := buffer[start:i]
 				value = escapeStringValue(value)
-				point.AddField(key, value, String)
+				point.AddStringField(key, value)
 				stat = PARSE_FIELD_VALUE_DONE
 			} else {
 				continue
 			}
 		} else if stat == PARSE_FIELD_VALUE_NUMBER {
-			if c >= byte('0') && c <= byte('9') ||
-				c == byte('E') || c == byte('e') ||
-				c == byte('+') || c == byte('-') {
+			log.Println("number", i, c)
+			if c >= '0' && c <= '9' ||
+				c == 'E' || c == 'e' ||
+				c == '+' || c == '-' {
 				continue
-			} else if c == byte(' ') || c == byte(','){
+			} else if c == ' ' || c == ',' {
 				value := buffer[start:i]
 				iv, err := strconv.ParseInt(string(value), 10, 64)
 				if err == nil {
-					point.AddField(key, iv, Integer)
+					point.AddIntegerField(key, iv)
 				} else {
 					fv, err := strconv.ParseFloat(string(value), 64)
 					if err != nil {
 						goto value_error
 					} else {
-						point.AddField(key, fv, Float)
+						point.AddFloatField(key, fv)
 					}
 				}
-				if c == byte(',') {
+				if c == ',' {
+					start = i + 1
 					stat = PARSE_FIELD_KEY
-				} else if c == byte(' ') {
+				} else if c == ' ' {
 					stat = PARSE_FIELD_VALUE_DONE
 				}
 			} else {
 				goto value_error
 			}
 		} else if stat == PARSE_FIELD_VALUE_BOOLEAN_TR {
-			if c == byte('r') {
+			if c == 'r' {
 				stat = PARSE_FIELD_VALUE_BOOLEAN_TRU
 			} else {
 				goto value_error
 			}
 		} else if stat == PARSE_FIELD_VALUE_BOOLEAN_TRU {
-			if c == byte('u') {
+			if c == 'u' {
 				stat = PARSE_FIELD_VALUE_BOOLEAN_TRUE
 			} else {
 				goto value_error
 			}
 		} else if stat == PARSE_FIELD_VALUE_BOOLEAN_TRUE {
-			if c == byte('e') {
-				point.AddField(key, true, Boolean)
+			if c == 'e' {
+				point.AddBooleanField(key, true)
 				stat = PARSE_FIELD_VALUE_DONE
 			} else {
 				goto value_error
 			}
 		} else if stat == PARSE_FIELD_VALUE_BOOLEAN_FA {
-			if c == byte('a') {
+			if c == 'a' {
 				stat = PARSE_FIELD_VALUE_BOOLEAN_FAL
 			} else {
 				goto value_error
 			}
 		} else if stat == PARSE_FIELD_VALUE_BOOLEAN_FAL {
-			if c == byte('l') {
+			if c == 'l' {
 				stat = PARSE_FIELD_VALUE_BOOLEAN_FALS
 			} else {
 				goto value_error
 			}
 		} else if stat == PARSE_FIELD_VALUE_BOOLEAN_FALS {
-			if c == byte('s') {
+			if c == 's' {
 				stat = PARSE_FIELD_VALUE_BOOLEAN_FALSE
 			} else {
 				goto value_error
 			}
 		} else if stat == PARSE_FIELD_VALUE_BOOLEAN_FALSE {
-			if c == byte('e') {
-				point.AddField(key, false, Boolean)
+			if c == 'e' {
+				point.AddBooleanField(key, false)
+				stat = PARSE_FIELD_VALUE_DONE
+			} else {
+				goto value_error
+			}
+		} else if stat == PARSE_FIELD_VALUE_NU {
+			if c == 'u' {
+				stat = PARSE_FIELD_VALUE_NUL
+			} else {
+				goto value_error
+			}
+		} else if stat == PARSE_FIELD_VALUE_NUL {
+			if c == 'l' {
+				stat = PARSE_FIELD_VALUE_NULL
+			} else {
+				goto value_error
+			}
+		} else if stat == PARSE_FIELD_VALUE_NULL {
+			if c == 'l' {
+				point.AddNullField(key)
 				stat = PARSE_FIELD_VALUE_DONE
 			} else {
 				goto value_error
 			}
 		} else if stat == PARSE_FIELD_VALUE_DONE {
-			if c == ',' {
+			if c == '\n' {
+				goto line_error
+			} else if c == ',' {
+				start = i + 1
 				stat = PARSE_FIELD_KEY
-			} else if c == byte(' ') {
+			} else if c == ' ' {
 				stat = PARSE_TIME_START
 			} else {
+				start = i
 				stat = PARSE_TIME
 			}
 		} else if stat == PARSE_TIME_START {
-			if c == byte('\n') {
+			if c == '\n' {
 				goto line_error
-			} else if c != byte(' ') {
+			} else if c != ' ' {
 				start = i
 				stat = PARSE_TIME
 			} else {
@@ -311,11 +341,16 @@ func Parse(buffer []byte) ([]*Point, error) {
 			}
 		} else if stat == PARSE_TIME {
 			log.Println("time", i, c)
-			if c < '0' && c > '9' || i == buflen - 1{
-				stime := buffer[start:i]
+			if c < '0' && c > '9' || i == buflen-1 {
+				var stime []byte
+				if i == buflen-1 {
+					stime = buffer[start : i+1]
+				} else {
+					stime = buffer[start:i]
+				}
 				itime, err := strconv.ParseInt(string(stime), 10, 64)
 				if err != nil {
-					log.Println(stime, err)
+					log.Println(string(stime), err)
 					goto time_error
 				}
 				point.SetTime(itime)
@@ -358,15 +393,62 @@ func (p *Point) Tags() []Tag {
 }
 
 func (p *Point) AddTag(key, value []byte) {
-	p.tags = append(p.tags, Tag{Key: key, Value: value})
+	tag := Tag{
+		Key:   key,
+		Value: value,
+	}
+
+	p.tags = append(p.tags, tag)
+
+	sort.Slice(p.tags, func(i, j int) bool {
+		ki := append(p.tags[i].Key, p.tags[i].Value...)
+		kj := append(p.tags[j].Key, p.tags[j].Value...)
+		return bytes.Compare(ki, kj) < 0
+	})
 }
 
 func (p *Point) Fields() []Field {
 	return p.fields
 }
 
-func (p *Point) AddField(key []byte, value interface{}, vtype FieldType) {
+func (p *Point) AddIntegerField(key []byte, value int64) {
+	p.fields = append(p.fields, Field{
+		Key:   key,
+		Value: value,
+		Type:  Integer,
+	})
+}
 
+func (p *Point) AddFloatField(key []byte, value float64) {
+	p.fields = append(p.fields, Field{
+		Key:   key,
+		Value: value,
+		Type:  Float,
+	})
+}
+
+func (p *Point) AddStringField(key []byte, value []byte) {
+	p.fields = append(p.fields, Field{
+		Key:   key,
+		Value: value,
+		Type:  String,
+	})
+}
+
+func (p *Point) AddBooleanField(key []byte, value bool) {
+	p.fields = append(p.fields, Field{
+		Key:   key,
+		Value: value,
+		Type:  Boolean,
+	})
+}
+
+func (p *Point) AddNullField(key []byte) {
+	p.fields = append(p.fields, Field{
+		Key:   key,
+		Value: nil,
+		Type:  Null,
+	})
 }
 
 func (p *Point) SetTime(tm int64) {
@@ -377,49 +459,119 @@ func (p *Point) Time() int64 {
 	return p.time
 }
 
-func (p *Point) Key() []byte {
-	key := p.name
+func (p *Point) SeriesKey() []byte {
+	key := bytes.Buffer{}
+	key.Write(p.name)
 	for _, tag := range p.tags {
-		key = append(key, tag.Key...)
-		key = append(key, tag.Value...)
+		key.Write(tag.Key)
+		key.Write(tag.Value)
 	}
-	return key
+	return key.Bytes()
 }
 
 func (p *Point) String() string {
 	buf := bytes.Buffer{}
 	buf.Write(p.name)
 	for _, tag := range p.tags {
-		buf.WriteRune(',')
+		buf.WriteByte(',')
 		buf.Write(tag.Key)
-		buf.WriteRune('=')
+		buf.WriteByte('=')
 		buf.Write(tag.Value)
 	}
-	buf.WriteRune(' ')
+	buf.WriteByte(' ')
 	for _, field := range p.fields {
 		buf.Write(field.Key)
-		buf.WriteRune('=')
+		buf.WriteByte('=')
 		switch field.Type {
-			case Integer:
-				buf.WriteString(strconv.FormatInt(field.Value.(int64), 10))
-			case Float:
-				buf.WriteString(strconv.FormatFloat(field.Value.(float64), 'f', -1, 64))
-			case String:
-				buf.WriteString(field.Value.(string))
-			case Boolean:
-				if field.Value.(bool) {
-					buf.WriteString("true")
-				} else {
-					buf.WriteString("false")
-				}
-			case Null:
-				buf.WriteString("null")
-			default:
-				panic("unknown value type of point")
+		case Integer:
+			buf.WriteString(strconv.FormatInt(field.Value.(int64), 10))
+		case Float:
+			buf.WriteString(strconv.FormatFloat(field.Value.(float64), 'f', -1, 64))
+		case String:
+			buf.WriteString(field.Value.(string))
+		case Boolean:
+			if field.Value.(bool) {
+				buf.WriteString("true")
+			} else {
+				buf.WriteString("false")
+			}
+		case Null:
+			buf.WriteString("null")
+		default:
+			panic("unknown value type of point")
 		}
-		buf.WriteRune(',')
+		buf.WriteByte(',')
 	}
-	buf.Truncate(buf.Len()-1)
+	buf.Truncate(buf.Len() - 1)
+	buf.WriteByte(' ')
 	buf.WriteString(strconv.FormatInt(p.time, 10))
 	return buf.String()
+}
+
+type FieldIterator struct {
+	seriesKey []byte
+	fields    []Field
+	index     int
+}
+
+func NewFieldIterator(point *Point) *FieldIterator {
+	iter := FieldIterator{}
+	iter.seriesKey = point.SeriesKey()
+	iter.fields = point.Fields()
+	iter.index = -1
+	log.Println(string(iter.seriesKey))
+	return &iter
+}
+
+func (i *FieldIterator) Reset() {
+	i.index = -1
+}
+
+func (i *FieldIterator) Iterate() bool {
+	if i.index == len(i.fields)-1 {
+		return false
+	} else {
+		i.index += 1
+		return true
+	}
+}
+
+func (i *FieldIterator) Key() []byte {
+	return i.fields[i.index].Key
+}
+
+func (i FieldIterator) Type() ValueType {
+	return i.fields[i.index].Type
+}
+
+func (i FieldIterator) Value() interface{} {
+	return i.fields[i.index].Value
+}
+
+func (i *FieldIterator) IntegerValue() (int64, error) {
+	if i.fields[i.index].Type != Integer {
+		return 0, WrongValueTypeError
+	}
+	return i.fields[i.index].Value.(int64), nil
+}
+
+func (i *FieldIterator) FloatValue() (float64, error) {
+	if i.fields[i.index].Type != Float {
+		return 0, WrongValueTypeError
+	}
+	return i.fields[i.index].Value.(float64), nil
+}
+
+func (i *FieldIterator) StringValue() ([]byte, error) {
+	if i.fields[i.index].Type != String {
+		return []byte{}, WrongValueTypeError
+	}
+	return i.fields[i.index].Value.([]byte), nil
+}
+
+func (i *FieldIterator) BooleanValue() (bool, error) {
+	if i.fields[i.index].Type != Boolean {
+		return false, WrongValueTypeError
+	}
+	return i.fields[i.index].Value.(bool), nil
 }
