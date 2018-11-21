@@ -3,12 +3,11 @@ package point
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 )
 
-type ValueType int
+type FieldType int
 
 const (
 	Integer = iota
@@ -25,8 +24,8 @@ type Tag struct {
 
 type Field struct {
 	Key   []byte
-	Type  ValueType
 	Value interface{}
+	Type  FieldType
 }
 
 type Point struct {
@@ -63,6 +62,7 @@ const (
 	PARSE_FIELD_VALUE_DONE
 	PARSE_TIME_START
 	PARSE_TIME
+	PARSE_DONE_LF
 	PARSE_DONE
 )
 
@@ -125,7 +125,6 @@ func Parse(buffer []byte) ([]*Point, error) {
 	var start = 0
 	var stat = PARSE_START
 	for i, c = range buffer {
-		//log.Println(i, c)
 		if stat == PARSE_START {
 			if c == ' ' || c == '\n' {
 				continue
@@ -140,7 +139,6 @@ func Parse(buffer []byte) ([]*Point, error) {
 			} else if c == ' ' && buffer[i-1] != '\\' {
 				name := buffer[start:i]
 				name = escape(name, []byte(", "))
-				log.Println(name)
 				point.SetName(name)
 				stat = PARSE_FIELD_KEY_START
 			} else if c == ',' && buffer[i-1] != '\\' {
@@ -206,6 +204,7 @@ func Parse(buffer []byte) ([]*Point, error) {
 			}
 		} else if stat == PARSE_FIELD_VALUE {
 			if c == '"' {
+				start = i + 1
 				stat = PARSE_FIELD_VALUE_STRING
 			} else if c >= '0' && c <= '9' || c == '-' {
 				stat = PARSE_FIELD_VALUE_NUMBER
@@ -228,8 +227,7 @@ func Parse(buffer []byte) ([]*Point, error) {
 				continue
 			}
 		} else if stat == PARSE_FIELD_VALUE_NUMBER {
-			log.Println("number", i, c)
-			if c >= '0' && c <= '9' ||
+			if c >= '0' && c <= '9' || c == '.' ||
 				c == 'E' || c == 'e' ||
 				c == '+' || c == '-' {
 				continue
@@ -340,8 +338,7 @@ func Parse(buffer []byte) ([]*Point, error) {
 				continue
 			}
 		} else if stat == PARSE_TIME {
-			log.Println("time", i, c)
-			if c < '0' && c > '9' || i == buflen-1 {
+			if c < '0' || c > '9' || i == buflen-1 {
 				var stime []byte
 				if i == buflen-1 {
 					stime = buffer[start : i+1]
@@ -350,19 +347,35 @@ func Parse(buffer []byte) ([]*Point, error) {
 				}
 				itime, err := strconv.ParseInt(string(stime), 10, 64)
 				if err != nil {
-					log.Println(string(stime), err)
 					goto time_error
 				}
 				point.SetTime(itime)
 				points = append(points, point)
+
+				if c == '\n' || i == buflen - 1 {
+					start = i + 1
+					stat = PARSE_START
+				} else if c == ' ' {
+					stat = PARSE_DONE
+				} else {
+					goto extra_error
+				}
+			} else {
+				continue
+			}
+		} else if stat == PARSE_DONE {
+			if c == '\n' || i == buflen - 1 {
+				start = i + 1
 				stat = PARSE_START
+			} else if c != ' ' {
+				goto extra_error
 			} else {
 				continue
 			}
 		}
 	}
 
-	if stat != PARSE_START {
+	if stat != PARSE_START && stat != PARSE_DONE {
 		goto partial_error
 	}
 
@@ -375,9 +388,11 @@ line_error:
 space_error:
 	return nil, fmt.Errorf("invalid character ' ' at index %d", i)
 value_error:
-	return nil, fmt.Errorf("invalid value")
+	return nil, fmt.Errorf("invalid value of '%c' near index %d", buffer[i], i)
 time_error:
-	return nil, fmt.Errorf("invalid time")
+	return nil, fmt.Errorf("invalid time of '%c' near index %d", buffer[i], i)
+extra_error:
+	return nil, fmt.Errorf("extra character '%c' at %d", buffer[i], i)
 }
 
 func (p *Point) Name() []byte {
@@ -509,17 +524,14 @@ func (p *Point) String() string {
 }
 
 type FieldIterator struct {
-	seriesKey []byte
 	fields    []Field
 	index     int
 }
 
 func NewFieldIterator(point *Point) *FieldIterator {
 	iter := FieldIterator{}
-	iter.seriesKey = point.SeriesKey()
 	iter.fields = point.Fields()
 	iter.index = -1
-	log.Println(string(iter.seriesKey))
 	return &iter
 }
 
@@ -527,7 +539,7 @@ func (i *FieldIterator) Reset() {
 	i.index = -1
 }
 
-func (i *FieldIterator) Iterate() bool {
+func (i *FieldIterator) Next() bool {
 	if i.index == len(i.fields)-1 {
 		return false
 	} else {
@@ -540,7 +552,7 @@ func (i *FieldIterator) Key() []byte {
 	return i.fields[i.index].Key
 }
 
-func (i FieldIterator) Type() ValueType {
+func (i FieldIterator) Type() FieldType {
 	return i.fields[i.index].Type
 }
 
@@ -548,30 +560,18 @@ func (i FieldIterator) Value() interface{} {
 	return i.fields[i.index].Value
 }
 
-func (i *FieldIterator) IntegerValue() (int64, error) {
-	if i.fields[i.index].Type != Integer {
-		return 0, WrongValueTypeError
-	}
-	return i.fields[i.index].Value.(int64), nil
+func (i *FieldIterator) IntegerValue() int64 {
+	return i.fields[i.index].Value.(int64)
 }
 
-func (i *FieldIterator) FloatValue() (float64, error) {
-	if i.fields[i.index].Type != Float {
-		return 0, WrongValueTypeError
-	}
-	return i.fields[i.index].Value.(float64), nil
+func (i *FieldIterator) FloatValue() float64 {
+	return i.fields[i.index].Value.(float64)
 }
 
-func (i *FieldIterator) StringValue() ([]byte, error) {
-	if i.fields[i.index].Type != String {
-		return []byte{}, WrongValueTypeError
-	}
-	return i.fields[i.index].Value.([]byte), nil
+func (i *FieldIterator) StringValue() []byte {
+	return i.fields[i.index].Value.([]byte)
 }
 
-func (i *FieldIterator) BooleanValue() (bool, error) {
-	if i.fields[i.index].Type != Boolean {
-		return false, WrongValueTypeError
-	}
-	return i.fields[i.index].Value.(bool), nil
+func (i *FieldIterator) BooleanValue() bool {
+	return i.fields[i.index].Value.(bool)
 }
