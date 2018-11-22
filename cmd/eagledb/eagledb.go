@@ -1,28 +1,13 @@
 package eagledb
 
-type Config struct {
-	ListenAddr string
-	ListenPort string
-}
-
-type EagleServer struct {
-	config *Config
-	databases []*Database
-	clients []Client
-}
-
-func (s *EagleSever) Start() error {
-
-}
-
-func (s *EagleServer) CreateDatabase(name string) error {
-
-}
+import (
+	"github.com/eagledb/eagledb"
+)
 
 func main() {
-	s := EagleServer{}
+	server := eagledb.Server{}
 
-	err := e.Start()
+	err := server.Start()
 	if err != nil {
 		fmt.Println("failed to start eagledb:", err)
 	}
