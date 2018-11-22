@@ -66,15 +66,11 @@ const (
 	PARSE_DONE
 )
 
-var (
-	WrongValueTypeError = fmt.Errorf("wrong value type")
-)
-
 func escape(value []byte, chars []byte) []byte {
 	r := make([]byte, 0, len(value))
 	for _, c := range value {
 		for _, e := range chars {
-			if c == e || c == byte('\\') {
+			if c == e || c == '\\' {
 				r = append(r, '\\')
 			}
 		}
@@ -83,31 +79,139 @@ func escape(value []byte, chars []byte) []byte {
 	return r
 }
 
-func unescape(value []byte, chars []byte) []byte {
+func unescape(value []byte, chars []byte) ([]byte, error) {
 	r := make([]byte, 0, len(value))
-	vlen := len(value)
-	for i, c := range value {
-		if c == byte('\\') {
-			if i == vlen-1 {
-				r = append(r, c)
-			} else {
+	escape := false
+	for _, c := range value {
+		if c == '\\' && !escape {
+			escape = true
+		} else {
+			if escape {
+				found := false
 				for _, e := range chars {
-					if value[i+1] == e || value[i+1] == byte('\\') {
-						continue
-					} else {
-						r = append(r, c)
+					if c == e || c == '\\' {
+						found = true
+						break
 					}
 				}
+				if !found {
+					return nil, fmt.Errorf("unknown escape character %c", c)
+				}
+				r = append(r, c)
+				escape = false
+			} else {
+				r = append(r, c)
 			}
-		} else {
-			r = append(r, c)
 		}
 	}
-	return r
+	return r, nil
+}
+
+func escapeName(value []byte) []byte {
+	return escape(value, []byte(", "))
+}
+
+func unescapeName(value []byte) ([]byte, error) {
+	return unescape(value, []byte(", "))
+}
+
+func escapeTagKey(value []byte) []byte {
+	return escape(value, []byte("= "))
+}
+
+func unescapeTagKey(value []byte) ([]byte, error) {
+	return unescape(value, []byte("= "))
+}
+
+func escapeTagValue(value []byte) []byte {
+	return escape(value, []byte(", "))
+}
+
+func unescapeTagValue(value []byte) ([]byte, error) {
+	return unescape(value, []byte(", "))
+}
+
+func escapeFieldKey(value []byte) []byte {
+	return escape(value, []byte("= "))
+}
+
+func unescapeFieldKey(value []byte) ([]byte, error) {
+	return unescape(value, []byte("= "))
 }
 
 func escapeStringValue(value []byte) []byte {
-	return value
+	buffer := &bytes.Buffer{}
+	buffer.Grow(len(value))
+
+	for _, c := range value {
+		if c == '"' {
+			buffer.WriteString(`\"`)
+		} else if c == '\\' {
+			buffer.WriteString(`\\`)
+		} else if c == '/' {
+			buffer.WriteString(`\/`)
+		} else if c == '\b' {
+			buffer.WriteString(`\b`)
+		} else if c == '\f' {
+			buffer.WriteString(`\f`)
+		} else if c == '\n' {
+			buffer.WriteString(`\n`)
+		} else if c == '\r' {
+			buffer.WriteString(`\r`)
+		} else if c == '\t' {
+			buffer.WriteString(`\t`)
+		} else {
+			buffer.WriteByte(c)
+		}
+	}
+
+	return buffer.Bytes()
+}
+
+func unescapeStringValue(value []byte) ([]byte, error) {
+	vlen := len(value)
+	buffer := &bytes.Buffer{}
+	buffer.Grow(vlen)
+	for i := 0; i < vlen; i++ {
+		if value[i] == '\\' {
+			i++
+			if i == vlen {
+				return nil, fmt.Errorf("end with invalid '\\'")
+			}
+			if value[i] == '"' {
+				buffer.WriteByte('"')
+			} else if value[i] == '\\' {
+				buffer.WriteByte('\\')
+			} else if value[i] == '/' {
+				buffer.WriteByte('/')
+			} else if value[i] == 'b' {
+				buffer.WriteByte('\b')
+			} else if value[i] == 'f' {
+				buffer.WriteByte('\f')
+			} else if value[i] == 'n' {
+				buffer.WriteByte('\n')
+			} else if value[i] == 'r' {
+				buffer.WriteByte('\r')
+			} else if value[i] == 't' {
+				buffer.WriteByte('\t')
+			} else if value[i] == 'u' {
+				i++
+				if i+4 > vlen {
+					return nil, fmt.Errorf("expecting 4 hex digits")
+				}
+				code, err := strconv.ParseInt(string(value[i:i+4]), 16, 32)
+				if err != nil {
+					return nil, fmt.Errorf("parse code point error")
+				}
+				buffer.WriteRune(rune(code))
+				i += 3
+			}
+		} else {
+			buffer.WriteByte(value[i])
+		}
+	}
+
+	return buffer.Bytes(), nil
 }
 
 func Parses(buffer string) ([]*Point, error) {
@@ -118,12 +222,14 @@ func Parse(buffer []byte) ([]*Point, error) {
 	points := []*Point{}
 
 	var point *Point
+	var err error
 	var i int
 	var c byte
 	var key []byte
 	var buflen = len(buffer)
 	var start = 0
 	var stat = PARSE_START
+
 	for i, c = range buffer {
 		if stat == PARSE_START {
 			if c == ' ' || c == '\n' {
@@ -136,17 +242,19 @@ func Parse(buffer []byte) ([]*Point, error) {
 		} else if stat == PARSE_NAME {
 			if c == '\n' {
 				goto line_error
-			} else if c == ' ' && buffer[i-1] != '\\' {
+			} else if (c == ',' || c == ' ') && buffer[i-1] != '\\' {
 				name := buffer[start:i]
-				name = escape(name, []byte(", "))
+				name, err = unescapeName(name)
+				if err != nil {
+					goto unescape_error
+				}
 				point.SetName(name)
-				stat = PARSE_FIELD_KEY_START
-			} else if c == ',' && buffer[i-1] != '\\' {
-				name := buffer[start:i]
-				name = escape(name, []byte(", "))
-				point.SetName(name)
-				start = i + 1
-				stat = PARSE_TAG_KEY
+				if c == ' ' {
+					stat = PARSE_FIELD_KEY_START
+				} else {
+					start = i + 1
+					stat = PARSE_TAG_KEY
+				}
 			} else {
 				continue
 			}
@@ -157,7 +265,10 @@ func Parse(buffer []byte) ([]*Point, error) {
 				goto space_error
 			} else if c == '=' && buffer[i-1] != '\\' {
 				key = buffer[start:i]
-				key = escape(key, []byte("= "))
+				key, err = unescapeTagKey(key)
+				if err != nil {
+					goto unescape_error
+				}
 				start = i + 1
 				stat = PARSE_TAG_VALUE
 			} else {
@@ -166,17 +277,19 @@ func Parse(buffer []byte) ([]*Point, error) {
 		} else if stat == PARSE_TAG_VALUE {
 			if c == '\n' {
 				goto line_error
-			} else if c == ' ' && buffer[i-1] != '\\' {
+			} else if (c == ',' || c == ' ') && buffer[i-1] != '\\' {
 				value := buffer[start:i]
-				value = escape(value, []byte(",="))
+				value, err = unescapeTagValue(value)
+				if err != nil {
+					goto unescape_error
+				}
 				point.AddTag(key, value)
-				stat = PARSE_FIELD_KEY_START
-			} else if c == ',' && buffer[i-1] != '\\' {
-				value := buffer[start:i]
-				value = escape(value, []byte(",="))
-				point.AddTag(key, value)
-				start = i + 1
-				stat = PARSE_TAG_KEY
+				if c == ' ' {
+					stat = PARSE_FIELD_KEY_START
+				} else {
+					start = i + 1
+					stat = PARSE_TAG_KEY
+				}
 			} else {
 				continue
 			}
@@ -196,7 +309,10 @@ func Parse(buffer []byte) ([]*Point, error) {
 				goto space_error
 			} else if c == '=' && buffer[i-1] != '\\' {
 				key = buffer[start:i]
-				key = escape(key, []byte("= "))
+				key, err = unescapeFieldKey(key)
+				if err != nil {
+					goto unescape_error
+				}
 				start = i + 1
 				stat = PARSE_FIELD_VALUE
 			} else {
@@ -220,7 +336,10 @@ func Parse(buffer []byte) ([]*Point, error) {
 		} else if stat == PARSE_FIELD_VALUE_STRING {
 			if c == '"' && buffer[i-1] != '\\' {
 				value := buffer[start:i]
-				value = escapeStringValue(value)
+				value, err = unescapeStringValue(value)
+				if err != nil {
+					goto unescape_error
+				}
 				point.AddStringField(key, value)
 				stat = PARSE_FIELD_VALUE_DONE
 			} else {
@@ -352,7 +471,7 @@ func Parse(buffer []byte) ([]*Point, error) {
 				point.SetTime(itime)
 				points = append(points, point)
 
-				if c == '\n' || i == buflen - 1 {
+				if c == '\n' || i == buflen-1 {
 					start = i + 1
 					stat = PARSE_START
 				} else if c == ' ' {
@@ -364,7 +483,7 @@ func Parse(buffer []byte) ([]*Point, error) {
 				continue
 			}
 		} else if stat == PARSE_DONE {
-			if c == '\n' || i == buflen - 1 {
+			if c == '\n' || i == buflen-1 {
 				start = i + 1
 				stat = PARSE_START
 			} else if c != ' ' {
@@ -393,6 +512,8 @@ time_error:
 	return nil, fmt.Errorf("invalid time of '%c' near index %d", buffer[i], i)
 extra_error:
 	return nil, fmt.Errorf("extra character '%c' at %d", buffer[i], i)
+unescape_error:
+	return nil, fmt.Errorf("unescape error near index %d: %s", i, err)
 }
 
 func (p *Point) Name() []byte {
@@ -486,16 +607,16 @@ func (p *Point) SeriesKey() []byte {
 
 func (p *Point) String() string {
 	buf := bytes.Buffer{}
-	buf.Write(p.name)
+	buf.Write(escapeName(p.name))
 	for _, tag := range p.tags {
 		buf.WriteByte(',')
-		buf.Write(tag.Key)
+		buf.Write(escapeTagKey(tag.Key))
 		buf.WriteByte('=')
-		buf.Write(tag.Value)
+		buf.Write(escapeTagValue(tag.Value))
 	}
 	buf.WriteByte(' ')
 	for _, field := range p.fields {
-		buf.Write(field.Key)
+		buf.Write(escapeFieldKey(field.Key))
 		buf.WriteByte('=')
 		switch field.Type {
 		case Integer:
@@ -503,7 +624,9 @@ func (p *Point) String() string {
 		case Float:
 			buf.WriteString(strconv.FormatFloat(field.Value.(float64), 'f', -1, 64))
 		case String:
-			buf.WriteString(field.Value.(string))
+			buf.WriteByte('"')
+			buf.WriteString(string(escapeStringValue(field.Value.([]byte))))
+			buf.WriteByte('"')
 		case Boolean:
 			if field.Value.(bool) {
 				buf.WriteString("true")
@@ -512,8 +635,6 @@ func (p *Point) String() string {
 			}
 		case Null:
 			buf.WriteString("null")
-		default:
-			panic("unknown value type of point")
 		}
 		buf.WriteByte(',')
 	}
@@ -524,8 +645,8 @@ func (p *Point) String() string {
 }
 
 type FieldIterator struct {
-	fields    []Field
-	index     int
+	fields []Field
+	index  int
 }
 
 func NewFieldIterator(point *Point) *FieldIterator {

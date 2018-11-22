@@ -8,9 +8,9 @@ import (
 	"github.com/eagledb/eagledb/point"
 )
 
-var sbuf = "cpu_usage,host=debian,cpu=0 user=123,system=456 153456433\n" +
+var sbuf = "cpu\\ us\\,age,h\\ o\\=st=d\\,e\\ bian,cpu=0 u\\=s\\ er=123,system=456 153456433\n" +
 	"disk_io,host=debian,disk=sda write=123.456,read=45.63 153456433 \n" +
-	"ip_addr,host=debian,if=eth0 ip=\"192.168.1.1\" 153456433\n " +
+	"ip_addr,host=debian,if=eth0 ip=\"192.168.1.1\\n\\tqwe\" 153456433\n " +
 	"service,host=debian,service=apache2 up=true,down=false 153456433 \n " +
 	"null,host=debian value=null 153456433"
 
@@ -34,6 +34,7 @@ func ExampleParse() {
 	}
 
 	for _, p := range points {
+		log.Println(p.String())
 		fmt.Printf("%s ", p.Name())
 
 		for _, tag := range p.Tags() {
@@ -42,7 +43,7 @@ func ExampleParse() {
 
 		iter := point.NewFieldIterator(p)
 		for iter.Next() {
-			if iter.Type() == point.String{
+			if iter.Type() == point.String {
 				fmt.Printf("%s %s ", iter.Key(), iter.Value())
 			} else {
 				fmt.Printf("%s %v ", iter.Key(), iter.Value())
@@ -53,9 +54,10 @@ func ExampleParse() {
 	}
 
 	// Output:
-	// cpu_usage cpu 0 host debian user 123 system 456 153456433
+	// cpu us,age cpu 0 h o=st d,e bian u=s er 123 system 456 153456433
 	// disk_io disk sda host debian write 123.456 read 45.63 153456433
-	// ip_addr host debian if eth0 ip 192.168.1.1 153456433
+	// ip_addr host debian if eth0 ip 192.168.1.1
+	// 	qwe 153456433
 	// service host debian service apache2 up true down false 153456433
 	// null host debian value <nil> 153456433
 }
