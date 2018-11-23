@@ -1,0 +1,13 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"checksumSHA1": "9yVQ6d8dk3faa4p/njti+vG0OOY=",
+			"path": "github.com/pelletier/go-toml",
+			"revision": "b56e1b27b494551f2dec9703efa22e3ce23285eb",
+			"revisionTime": "2018-11-19T16:27:10Z"
+		}
+	],
+	"rootPath": "github.com/eagledb/eagledb"
+}
