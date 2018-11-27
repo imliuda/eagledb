@@ -1,11 +1,16 @@
 package lsmtree
 
-type Cache map[string]model.TimeValue
+import (
+	"github.com/eagledb/eagledb/point"
+)
 
-func (c *Cache) Add([]*model.Point) error {
-
+type Cache struct {
 }
 
-func (c *Cache) Get(mesurement string, tags map[string]string, start, end time.Time) {
+func NewCache() *Cache {
+	return &Cache{}
+}
 
+func (c *Cache) Add([]*point.Point) error {
+	return nil
 }

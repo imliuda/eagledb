@@ -1,52 +1,48 @@
 package lsmtree
 
 import (
-	"github.com/eagledb/eagledb/model"
+	"github.com/eagledb/eagledb/point"
+	"log"
+	"time"
 )
 
-type Engine struct {
+type LsmTree struct {
 	wal       *Wal
 	cache     *Cache
 	compactor *Compactor
-	config    *Config
-	index     *Index
-	store     *Store
 }
 
-func (e *Engine) Start() error {
-	wal, err := NewWal(e.config.Wal)
-	if err != nil {
-		return err
-	}
-	e.wal = wal
+func (e *LsmTree) Start() error {
+	e.wal = NewWal()
+	e.cache = NewCache()
+	e.compactor = NewCompactor()
 
-	cache, err := NewCache(e.config.Cache)
-	if err != nil {
-		return nil
-	}
-	e.cache = cache
+	e.compactor.Schedule()
 
-	e.compactor = NewCompactor(e.config.Compactor)
-	e.compactor.Start()
+	return nil
 }
 
-func (e *Engine) AddPoint(points []*model.Point) error {
-	err := e.wal.Append()
-	if err != nil {
-		return err
-	}
+func (e *LsmTree) WritePoints(points []*point.Point) error {
+	/*
+		err := e.wal.Append()
+		if err != nil {
+			return err
+		}
 
-	err = e.Cache.Add(points)
-
+		err = e.Cache.Add(points)
+	*/
+	log.Println(points)
+	return nil
 }
 
-func (e *Engine) QueryPoint() ([]*mode.Point, error) {
+func (e *LsmTree) QueryPoints() ([]*point.Point, error) {
 
+	return nil, nil
 }
 
-func (e *Engine) DeletePoint(mesurement string, tags map[string]string, start, end time.Time) {
+func (e *LsmTree) DeletePoints(mesurement string, tags map[string]string, start, end time.Time) {
 }
 
-func (e *Engine) CreateSnapShot(id string) {
+func (e *LsmTree) CreateSnapShot(id string) {
 
 }
