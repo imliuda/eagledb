@@ -1,48 +1,55 @@
-package scheme
+package schema
 
 import (
 	"encoding/binary"
 	"os"
+	"sync"
 )
 
-type Scheme struct {
+type Schema struct {
 	dir    string
 	tables map[string]*Table
+
+	lock sync.Mutex
 }
 
-func Open(dir string) (*Scheme, error) {
-
-}
-
-func (s *Scheme) loadTable(path) (*Table, error) {
-
-}
-
-func (s *Scheme) CreateTable(name string, cols []*Column) {
+func Open(dir string) (*Schema, error) {
 
 }
 
-func (s *Scheme) DropTable(name string) {
+func (s *Schema) CreateTable(name string, cols []*Column) {
 
 }
 
-func (s *Scheme) GetTable(name string) (*Table, error) {
+func (s *Schema) DropTable(name string) {
 
 }
 
-func (t *Table) Insert(name string, value []interface{}) error {
+func (s *Schema) Insert(name string, value []interface{}) error {
 
 }
 
-func (t *Table) Update(name string, value interface{}, conditions bool) error {
+func (s *Schema) Query(name string, value interface{}, conditions bool) error {
 
 }
 
-func (t *Table) Delete(name string, donctitinos bool) error {
+func (s *Schema) Update(name string, value interface{}, conditions bool) error {
 
 }
 
-func (t *Table) Flush(name string) error {
+func (s *Schema) Delete(name string, conditions bool) error {
+
+}
+
+func (s *Schema) Begin() error {
+
+}
+
+func (s *Schema) Commit() error {
+
+}
+
+func (s *Schema) Rollback() error {
 
 }
 
@@ -69,17 +76,36 @@ type Field struct {
 	Type FieldType
 }
 
-// scheme_count: int32
+// schema_count: int32
 //
-// scheme_name_size: int32
-// scheme_name:
-// scheme_type: int32
+// schema_name_size: int32
+// schema_name:
+// schema_type: int32
 // ...
 //
 // entry_size: int32
 // entry:
 // next: +count
 // ...
+//
+// magic number 4
+// version 1 byte
+// block size 2 byte
+// checksum 4 byte
+// prebuffer block_size
+//
+// Table File Format:
+// | Header Block
+// | Header Backup Block
+// | Data Backup  Block
+// | Data Block
+// | ...
+//
+// Header Block Format (4 KB):
+// | Magic Number (4 Byte)
+// | Version (1 Byte)
+// | Block Size (2 Byte)
+// |
 func NewMeta(path string, fields []Field) (*Meta, error) {
 	meta := &Meta{}
 	fieldMap := map[string]int{}
@@ -162,15 +188,15 @@ func NewMeta(path string, fields []Field) (*Meta, error) {
 	meta.datastart = index
 
 	if len(fieldMap) != len(diskFields) {
-		return nil, errors.New("scheme not match")
+		return nil, errors.New("schema not match")
 	}
 	for fname, ftype := range diskFields {
 		if value, ok := fieldMap[fname]; ok {
 			if value != ftype {
-				return nil, errors.New("scheme not match")
+				return nil, errors.New("schema not match")
 			}
 		} else {
-			return nil, errors.New("scheme not match")
+			return nil, errors.New("schema not match")
 		}
 	}
 
